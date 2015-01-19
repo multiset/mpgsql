@@ -1,0 +1,24 @@
+{application, mpgsql, [
+    {description, "A thin wrapper around epgsql and poolboy"},
+    {vsn, git},
+    {registered, [mpgsql_sup]},
+    {applications, [
+        kernel,
+        stdlib,
+        folsom,
+        lager,
+        epgsql,
+        poolboy
+    ]},
+    {mod, {mpgsql_app, []}},
+    {env, [
+        {pool_size, 30},
+        {hostname, {127, 0, 0, 1}},
+        {port, 5432},
+        {database, ""},
+        {username, ""},
+        {password, ""},
+        {query_timeout, 1000},
+        {checkout_backoff, 100}
+    ]}
+]}.
