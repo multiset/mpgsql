@@ -16,6 +16,8 @@
 -define(WORKER, mpgsql_worker).
 -define(TXREF, mpgsql_tx_ref).
 
+-include("mpgsql.hrl").
+
 %%
 %% Transaction management functions go directly to query_int because it doesn't
 %% make sense for them to auto-vivify a worker if there isn't one already.
@@ -130,7 +132,6 @@ query(Msg, Timeout) ->
     end.
 
 query_int(Msg, Timeout) ->
-    StartTime = os:timestamp(),
     Worker = erlang:get(?WORKER),
     Ref = erlang:get(?TXREF),
     try gen_server:call(Worker, {Ref, Msg}, Timeout) of
@@ -145,20 +146,17 @@ query_int(Msg, Timeout) ->
             %% We want to consider the worker dead, since it's potentially
             %% in an infinite wait for a socket response that might not ever
             %% arrive. Therefore, we simply kill it.
+            ?INCREMENT_COUNTER([mpgsql, queries, timeouts]),
             exit(Worker, kill),
             checkin(),
             {error, timeout};
         exit:{noproc, _} ->
             %% Our client died (or killed itself) already, or we never had one.
+            ?INCREMENT_COUNTER([mpgsql, workers, dead]),
             checkin(),
             {error, noproc}
-    after
-        folsom_metrics:notify_existing_metric(
-            {mpgsql, query_time},
-            timer:now_diff(os:timestamp(), StartTime),
-            histogram
-        )
     end.
+
 
 %%
 %% N.B.: This logic assumes that poolboy is *always* going to be responsive - we
@@ -188,14 +186,10 @@ checkout(StartTime, Timeout, Backoff0) when Timeout > 0 ->
             timer:sleep(min(Backoff1, Timeout)),
             checkout(StartTime, Timeout - Backoff1, Backoff1);
         Worker ->
-            DeltaMicros = timer:now_diff(os:timestamp(), StartTime) / 1000,
-            folsom_metrics:notify_existing_metric(
-                {mpgsql, checkout_time},
-                DeltaMicros,
-                histogram
-            ),
+            Delta = timer:now_diff(os:timestamp(), StartTime) div 1000,
+            ?UPDATE_HISTOGRAM([mpgsql, workers, checkout_time], Delta),
             erlang:put(?WORKER, Worker),
-            {ok, DeltaMicros / 1000}
+            {ok, Delta}
     end;
 checkout(_, _, _) ->
     {error, timeout}.
